@@ -1,0 +1,105 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{9A9687FA-9587-4FD2-804E-C27F9C47AAD1}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>UncertainEventStreams</RootNamespace>
+    <AssemblyName>UncertainEventStreams</AssemblyName>
+    <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LumenWorks.Framework.IO">
+      <HintPath>..\..\..\..\..\Desktop\CsvReader_src\LumenWorks.Framework.IO\bin\Release\LumenWorks.Framework.IO.dll</HintPath>
+    </Reference>
+    <Reference Include="MathNet.Numerics, Version=3.11.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\MathNet.Numerics.3.11.0\lib\net40\MathNet.Numerics.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Configuration" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Numerics" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Algorithms\RelationSatisfaction\MergeTree.cs" />
+    <Compile Include="Algorithms\RelationSatisfaction\NTree.cs" />
+    <Compile Include="Algorithms\RelationSatisfaction\RelationSatisfaction2.cs" />
+    <Compile Include="Algorithms\RelationSatisfaction\RelationSatisfaction.cs" />
+    <Compile Include="Algorithms\RelationSatisfaction\WindowBounds.cs" />
+    <Compile Include="Entities\Journey.cs" />
+    <Compile Include="Entities\JourneyKey.cs" />
+    <Compile Include="Entities\RunResult.cs" />
+    <Compile Include="Entities\World.cs" />
+    <Compile Include="Events\BasicIntervalEvent.cs" />
+    <Compile Include="Events\EventType.cs" />
+    <Compile Include="Events\SegmentedIntervalEvent.cs" />
+    <Compile Include="Events\PointEvent.cs" />
+    <Compile Include="Inference\ComparisonInfo.cs" />
+    <Compile Include="Inference\InferenceHelper.cs" />
+    <Compile Include="Preprocessing\EventLogStore.cs" />
+    <Compile Include="Preprocessing\FileImport.cs" />
+    <Compile Include="Preprocessing\Entities\BusDataItem.cs" />
+    <Compile Include="Preprocessing\Entities\JourneyPatternItem.cs" />
+    <Compile Include="Preprocessing\JourneyPatternsStore.cs" />
+    <Compile Include="Preprocessing\Tasks\Preprocess.cs" />
+    <Compile Include="Preprocessing\StoreHelper.cs" />
+    <Compile Include="Preprocessing\Tasks\AbstractTask.cs" />
+    <Compile Include="Preprocessing\Tasks\ImportTask.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config">
+      <SubType>Designer</SubType>
+    </None>
+    <None Include="packages.config">
+      <SubType>Designer</SubType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ProbeEvents\ProbeEvents.sqlproj">
+      <Project>{5c938cb3-f50f-4bea-a71b-9c2c5985c32b}</Project>
+      <Name>ProbeEvents</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>
