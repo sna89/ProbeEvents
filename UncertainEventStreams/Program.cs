@@ -16,7 +16,12 @@ namespace UncertainEventStreams
         {
             try
             {
-                new ImportTask().Run();
+                PreprocessTask preTask = new PreprocessTask();
+                preTask.Run();
+
+
+                //var FileImport = new FileImport();
+                //FileImport.Load();
                 return;
 
                 #region Run inference
