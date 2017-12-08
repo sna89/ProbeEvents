@@ -12,10 +12,16 @@ namespace UncertainEventStreams.Preprocessing
     public class StoreHelper
     {
         private const int NUM_OF_EVENTS = 4;
+        private const int NO_DATA = -1;
+        private const int JOURENT_PATTERN_STOP_COLUMN = 2;
+        private const int EVENT_LOG_STOP_COLUMN = 13;
+        private const int AT_STOP_COLUMN = 14;
+        private const int TIMESTAMP_COLUMN = 0;
+
         private List<string> EVENT_TYPES = new List<string>() { "0 - Start", "1 - NotActive", "2 - Resume", "3 - Active", "4 - Suspend", "5 - End" };
         enum EventType {
             Start,
-            NotAcive,
+            NotActive,
             Resume,
             Active,
             Suspend,
@@ -83,40 +89,75 @@ namespace UncertainEventStreams.Preprocessing
             }
         }
 
-        public DataTable FillJourneyPatternsDT(string query, List<string> JourneyList)
+        public DataTable FillJourneyPatternsDT(List<string> JourneyList)
         {
+            #region query
+            //STEP 1:
+            //Get all (or relavant) journey pattern details ([Journey Pattern ID],[Stop Index],[Stop ID])
+            //ordered by [Journey Pattern ID],[Stop Index] (ASC) from JourneyPatterns table
+
+            var journeyPatternsQuery = @"
+            WITH DS as
+            (
+            SELECT DISTINCT CASE WHEN LEN([Journey Pattern ID]) = 5 THEN (select CONCAT('000',[Journey Pattern ID]))
+	               WHEN LEN([Journey Pattern ID]) = 6 THEN (select CONCAT('00',[Journey Pattern ID]))
+	               WHEN LEN([Journey Pattern ID]) = 7 THEN (select CONCAT('0',[Journey Pattern ID]))
+	               ELSE [Journey Pattern ID]
+	               END AS [Journey Pattern ID]
+	               ,[Stop Index]
+                  ,[A]
+                  ,[Stop ID]
+                  ,[B]
+                  ,[C]
+                  ,[D]
+            FROM [ProbeEvents].[dbo].[JourneyPatterns]
+            )
+            SELECT DISTINCT [Journey Pattern ID],[Stop Index],[Stop ID]
+              FROM DS
+              where 1 = 1 and 
+              [Journey Pattern ID] in (select distinct [Journey Pattern ID] from [ProbeEvents].[dbo].[EventLog])
+              order by [Journey Pattern ID],[Stop Index]
+              ";
+            #endregion
+
+            #region Create Datatable
             DataTable dt = new DataTable();
             dt.Columns.Add("Journey Pattern ID", typeof(string));
             dt.Columns.Add("Stop Index", typeof(string));
             dt.Columns.Add("Stop ID", typeof(string));
-            using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
-            {
-                //Open connection
-                conn.Open();
+            #endregion
 
-                SqlCommand cmd = new SqlCommand(query, conn);
-                SqlDataReader reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    var row = dt.NewRow();
-                    row[0] = reader.GetString(0);
-                    if (!JourneyList.Contains(row[0]))
-                    {
-                        string Journey = row[0].ToString();
-                        JourneyList.Add(Journey);
-                    }
-                    row[1] = reader.GetInt32(1);
-                    row[2] = reader.GetInt32(2);
-                    dt.Rows.Add(row);
-                }
+            #region execute query
+                        using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+                        {
+                            //Open connection
+                            conn.Open();
 
-                reader.Close();
-                conn.Close();
-            }
+                            SqlCommand cmd = new SqlCommand(journeyPatternsQuery, conn);
+                            SqlDataReader reader = cmd.ExecuteReader();
+                            while (reader.Read())
+                            {
+                                var row = dt.NewRow();
+                                row[0] = reader.GetString(0);
+                                if (!JourneyList.Contains(row[0]))
+                                {
+                                    string Journey = row[0].ToString();
+                                    JourneyList.Add(Journey);
+                                }
+                                row[1] = reader.GetInt32(1);
+                                row[2] = reader.GetInt32(2);
+                                dt.Rows.Add(row);
+                            }
+
+                            reader.Close();
+                            conn.Close();
+                        }
+                        #endregion
+
             return dt;
         }
 
-        public DataTable FillEventLogDT(List<String> journeyList, bool test)
+        public DataTable CreateEventLog()
         {
             DataTable dt = new DataTable();
             var FileImport = new FileImport();
@@ -125,25 +166,28 @@ namespace UncertainEventStreams.Preprocessing
             {
                 dt.Columns.Add(col.Key, col.Value);
             }
-            string sqlQuery = @"select * from [ProbeEvents].[dbo].[EventLog]";
+            return dt;
+        }
+
+        public void AddJourenyToEventLogDT(DataTable eventLogDT, String journey)
+        {
+           
+            string sqlQuery = "select * from [ProbeEvents].[dbo].[EventLog] where [Journey Pattern ID] = @journeyListID order by [Vehicle Journey ID],[Timestamp]";
+            
             using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
             {
                 conn.Open();
-                if (test)
-                {
-                    sqlQuery = "select * from[ProbeEvents].[dbo].[EventLog] where [Journey Pattern ID] = @journeyListID order by [Vehicle Journey ID],[Timestamp]";
-                }
                 using (SqlCommand command = new SqlCommand(sqlQuery, conn))
                 {
                     //string journeyListParameter = MakeJourneyListAsParameter(journeyList);
                     SqlParameter param = new SqlParameter();
                     param.ParameterName = "@journeyListID";
-                    param.Value = journeyList[0];
+                    param.Value = journey;
                     command.Parameters.Add(param);
                     SqlDataReader reader = command.ExecuteReader();
                     while (reader.Read())
                     {
-                        var row = dt.NewRow();
+                        var row = eventLogDT.NewRow();
                         row[0] = reader.GetValue(0);
                         row[1] = reader.GetValue(1);
                         row[2] = reader.GetValue(2);
@@ -159,179 +203,267 @@ namespace UncertainEventStreams.Preprocessing
                         row[12] = reader.GetValue(12);
                         row[13] = reader.GetValue(13);
                         row[14] = reader.GetValue(14);
-                        dt.Rows.Add(row);
+                        eventLogDT.Rows.Add(row);
                     }
+                    reader.Close();
                 }
             }
-            return dt;
         }
 
-        public DataTable CreateEventLogProcessedDT(DataTable journeyPatternsDT,DataTable eventLogDT)
+        public DataTable CreateEventLogProcessedDT()
         {
             //Step 1 - Create new dt to store processed events (ProcessedEventLog)
-            DataTable eventLogProcessed = new DataTable();
-            eventLogProcessed.Columns.Add("Vehicle Journey ID", typeof(Int32));
-            eventLogProcessed.Columns.Add("Journey Pattern ID", typeof(string));
-            eventLogProcessed.Columns.Add("Stop ID", typeof(Int32));
-            eventLogProcessed.Columns.Add("Timestamp", typeof(DateTime));
-            eventLogProcessed.Columns.Add("EventType", typeof(string));
-            eventLogProcessed.Columns.Add("Station Log Index", typeof(Int32));
-            eventLogProcessed.Columns.Add("JourneyIndex", typeof(Int32));
 
-            //Step 2 - Create help table which store only relavant data about Journey Pattern ID at a time. For example: 00010001
+            #region CreateTable
+            DataTable eventLogProcessedDT = new DataTable();
+            eventLogProcessedDT.Columns.Add("Vehicle Journey ID", typeof(Int32));
+            eventLogProcessedDT.Columns.Add("Journey Pattern ID", typeof(string));
+            eventLogProcessedDT.Columns.Add("Stop ID", typeof(Int32));
+            eventLogProcessedDT.Columns.Add("Timestamp", typeof(DateTime));
+            eventLogProcessedDT.Columns.Add("EventType", typeof(string));
+            eventLogProcessedDT.Columns.Add("Station Log Index", typeof(Int32));
+            eventLogProcessedDT.Columns.Add("JourneyIndex", typeof(Int32));
+            #endregion
+            return eventLogProcessedDT;
+        }
 
-            string journeyPatternID = journeyPatternsDT.Rows[0][0].ToString();
+        public void FillEventLogProcessedDT(DataTable journeyPatternsDT, DataTable eventLogDT,DataTable eventLogProcessedDT, string journeyPatternID) { 
+
             DataTable journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
             DataTable journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
-            int i = 0, j = 0;
+            int eventLogCounter = 0;
+            List<int> vehicleJourneyList = new List<int>();
 
-            while(j < journeyPatternEventLogDT.Rows.Count)
+            while(eventLogCounter < journeyPatternEventLogDT.Rows.Count)
             {
-                var journeyPatternRow = journeyPatternsDT.Rows[i];
-                if (journeyPatternID != journeyPatternRow[0].ToString())
-                {
-                    journeyPatternID = journeyPatternRow[0].ToString();
-                    journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
-                    journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+                //var journeyPatternRow = journeyPatternsDT.Rows[i];
+                //if (journeyPatternID != journeyPatternRow[0].ToString())
+                //{
+                //    journeyPatternID = journeyPatternRow[0].ToString();
+                //    journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+                //    journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
 
-                }
+                //}
                 //int stopIndex = Convert.ToInt32(row[1]);
                 //int stopID = Convert.ToInt32(journeyPatternRow[2]);
 
                 //Step 3 - use help table from step 3 and store only relavant date about Vehicle Journey ID. For example: 14841
                 //Meaning - This new help table will store date for specific journey. In this example (00010001,14841)
 
-                var eventLogRow = journeyPatternEventLogDT.Rows[j];
+                var eventLogRow = journeyPatternEventLogDT.Rows[eventLogCounter];
                 int vehicleJourneyID = Convert.ToInt32(eventLogRow[5]);
-                var JourneyEventLogDT = journeyPatternEventLogDT.AsEnumerable().Where(x => x.Field<int>("Vehicle Journey ID") == vehicleJourneyID).CopyToDataTable();
-
-                //step 4  - Compare event log help table with Journey Pattern help table and Add processed data to ProcessedEventLog datatable.
-                var row = eventLogProcessed.NewRow();
-                DateTime emptyTimeStamp = new DateTime();
-                EventType eventType;
-
-                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, -1, emptyTimeStamp,EventType.Start , -1, -1);
-
-                int i1 = 0, i2 = 0;
-                int journeyIndex = -1;
-                int stationLogIndex = 0;
-                
-                int eventLogStopID;
-                int atStop;
-                bool resumed = false;
-                bool active = false;
-                bool visited = false;
-
-                while (i1 < journeyPatternJourneyPatternsDT.Rows.Count && i2 < JourneyEventLogDT.Rows.Count)
+                if (!vehicleJourneyList.Contains(vehicleJourneyID))
                 {
-                    int journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[i1][2]);
+                    var journeyEventLogDT = journeyPatternEventLogDT.AsEnumerable().Where(x => x.Field<int>("Vehicle Journey ID") == vehicleJourneyID).CopyToDataTable();
+                    eventLogCounter = ProcessJourney(eventLogCounter, journeyPatternID, vehicleJourneyID, journeyPatternJourneyPatternsDT, journeyEventLogDT, eventLogProcessedDT);
+                    vehicleJourneyList.Add(vehicleJourneyID);
+                }
+                else
+                {
+                    eventLogCounter++;
+                }
+                
+            }
+        }
 
-                    eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[i2][13]);
+        private int ProcessJourney(int eventLogCounter, string journeyPatternID,int vehicleJourneyID,DataTable journeyPatternJourneyPatternsDT, DataTable JourneyEventLogDT, DataTable eventLogProcessed)
+        {
 
-                    if (journeyPatternStopID == eventLogStopID)
+            DateTime unknownTimeStamp = new DateTime();
+            int journeyIndex = 0;
+
+
+            int JourneyPatternsCounter = 0;
+            int JourneyEventLogCounter = 0;
+            int stationLogIndex = 0;
+            int eventLogStopID;
+            int atStop = -1;
+            bool resumed = false;
+            bool active = false;
+            bool visited = false;
+            bool firstStation = true;
+
+            int journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter][JOURENT_PATTERN_STOP_COLUMN]);
+
+            List<int> visitedStops = new List<int>();
+
+            while (JourneyPatternsCounter < journeyPatternJourneyPatternsDT.Rows.Count && JourneyEventLogCounter < JourneyEventLogDT.Rows.Count)
+            {
+                journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter][JOURENT_PATTERN_STOP_COLUMN]);
+
+                eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][EVENT_LOG_STOP_COLUMN]);
+
+                if (!visitedStops.Contains(eventLogStopID))
+                {
+                    if (firstStation)
                     {
-                            journeyIndex++;
-                            if (!visited)
-                            {
-                                stationLogIndex = 0;
-                                eventType = EventType.NotAcive;
-                                row = eventLogProcessed.NewRow();
-
-                                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, journeyPatternStopID, emptyTimeStamp, eventType, stationLogIndex, journeyIndex);
-
-                                journeyIndex++;
-                                stationLogIndex++;
-
-                                eventType = EventType.Resume;
-                                row = eventLogProcessed.NewRow();
-
-                                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, journeyPatternStopID, emptyTimeStamp, eventType, stationLogIndex, journeyIndex);
-                 
-                                journeyIndex++;
-                                stationLogIndex++;
-                                resumed = true;
-                                active = false;
-                            }
-                            atStop = Convert.ToInt32(JourneyEventLogDT.Rows[i2][14]);
+                        AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Start, stationLogIndex, journeyIndex);
+                        journeyIndex++;
+                        stationLogIndex++;
+                    }
+                    if (journeyPatternStopID != eventLogStopID)
+                    {
+                        
+                        if (visited)
+                        {
                             if (atStop == 0)
                             {
-                                eventType = EventType.Active;
-                                row = eventLogProcessed.NewRow();
-                                DateTime timestamp = (DateTime)(JourneyEventLogDT.Rows[i2][0]);
+                                //Last event of stopID in event log was Active and Suspend event is needed to be added as well.
 
-                                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, journeyPatternStopID, timestamp, eventType, stationLogIndex, journeyIndex);
-
-                                resumed = false;
-                                active = true;
+                                AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                                journeyIndex++;
                             }
-                            else if (atStop == 1)
-                            {
-                                if (resumed && !active)
-                                {
-                                    eventType = EventType.Active;
-                                    row = eventLogProcessed.NewRow();
-
-                                    AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, journeyPatternStopID, emptyTimeStamp, eventType, stationLogIndex, journeyIndex);
-
-                                    stationLogIndex++;
-                                    journeyIndex++;
-                                }
-                                eventType = EventType.Suspend;
-                                row = eventLogProcessed.NewRow();
-                                DateTime timestamp = (DateTime)(JourneyEventLogDT.Rows[i2][0]);
-                                
-                                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, journeyPatternStopID, timestamp, eventType, stationLogIndex, journeyIndex);
-
-                                resumed = false;
-                                active = false;
-                            }
-                            stationLogIndex++;
-                            i2++;
-                            visited = true;
+                            resumed = false;
+                            active = false;
+                            visited = false;
+                            JourneyPatternsCounter++;
                         }
                         else
                         {
-                            if (active)
+                            if (firstStation)
                             {
-                                journeyIndex++;
-                                eventType = EventType.Suspend;
-                                row = eventLogProcessed.NewRow();
-
-                                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, journeyPatternStopID, emptyTimeStamp, eventType, stationLogIndex, journeyIndex);
-                                resumed = false;
-                                active = false;
+                                firstStation = false;
                             }
+                            else
+                            {
+                                stationLogIndex = 0;
+                            }
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Resume, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Active, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+
                             stationLogIndex = 0;
-                            i1++;
+                            JourneyPatternsCounter++;
+                            resumed = false;
+                            active = false;
                             visited = false;
                         }
-
                     }
-                atStop = Convert.ToInt32(JourneyEventLogDT.Rows[i2-1][14]);
-                eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[i2 - 1][13]);
-                if ((i2 == JourneyEventLogDT.Rows.Count) && (atStop == 0))
-                {
-                    eventType = EventType.Suspend;
-                    row = eventLogProcessed.NewRow();
-                    AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, eventLogStopID, emptyTimeStamp, eventType, stationLogIndex, journeyIndex);
+                    else
+                    {
+                        if (!visited)
+                        {
+                            if (firstStation)
+                            {
+                                firstStation = false;
+                            }
+                            else
+                            {
+                                stationLogIndex = 0;
+                            }
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Resume, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            resumed = true;
+                        }
 
+                        atStop = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][AT_STOP_COLUMN]);
+
+                        if (atStop == 0)
+                        {
+                            DateTime timestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, timestamp, EventType.Active, stationLogIndex, journeyIndex);
+
+                            resumed = false;
+                            active = true;
+                        }
+                        else if (atStop == 1)
+                        {
+                            if (resumed && !active)
+                            {
+                                //If station in event log get only this value (at stop = 1) then we don't know when it was active.
+                                AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Active, stationLogIndex, journeyIndex);
+
+                                stationLogIndex++;
+                                journeyIndex++;
+                            }
+                            DateTime timestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, timestamp, EventType.Suspend, stationLogIndex, journeyIndex);
+
+                            resumed = false;
+                            active = false;
+                        }
+                        stationLogIndex++;
+                        journeyIndex++;
+                        visited = true;
+                        if ((JourneyEventLogCounter + 1 < JourneyEventLogDT.Rows.Count) &&
+                        (eventLogStopID != Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter + 1][EVENT_LOG_STOP_COLUMN])))
+                        {
+                            visitedStops.Add(eventLogStopID);
+                        }
+                        JourneyEventLogCounter++;
+                    }
                 }
-                row = eventLogProcessed.NewRow();
-                eventType = EventType.End;
+                else //!visitedStops.Contains(eventLogStopID)
+                {
+                    JourneyEventLogCounter++;
+                    visited = true;
+                }
 
-                AddEvent(eventLogProcessed, row, vehicleJourneyID, journeyPatternID, -1, emptyTimeStamp, eventType, -1, -1);
+            }//End While
 
-                j += i2;
+            atStop = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter - 1][AT_STOP_COLUMN]);
+            eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter - 1][EVENT_LOG_STOP_COLUMN]);
+            if ((JourneyEventLogCounter == JourneyEventLogDT.Rows.Count) && (atStop == 0))
+            {
+                AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, eventLogStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                journeyIndex++;
+                stationLogIndex++;
             }
-            return eventLogProcessed;
+            
+            while (JourneyPatternsCounter < journeyPatternJourneyPatternsDT.Rows.Count)
+            {
+                //In case when there is no more station in eventlog and there is more in jp
+                if (!visited)
+                {
+                    stationLogIndex = 0;
+                    journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter][JOURENT_PATTERN_STOP_COLUMN]);
+                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
+                    journeyIndex++;
+                    stationLogIndex++;
+                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Resume, stationLogIndex, journeyIndex);
+                    journeyIndex++;
+                    stationLogIndex++;
+                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Active, stationLogIndex, journeyIndex);
+                    journeyIndex++;
+                    stationLogIndex++;
+                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                    journeyIndex++;
+                    stationLogIndex++;
+                }
+                visited = false;
+                JourneyPatternsCounter++;
+            }
+
+            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.End, stationLogIndex, journeyIndex);
+
+            eventLogCounter += JourneyEventLogCounter;
+            return eventLogCounter;
         }
 
-        private void AddEvent(DataTable eventLogProcessed, DataRow row, int vehicleJourneyID, string journeyPatternID, int stopID, DateTime timestamp,EventType eventype
+
+        private void AddEvent(DataTable eventLogProcessed, int vehicleJourneyID, string journeyPatternID, int stopID, DateTime timestamp,EventType eventype
             ,int journeyIndex,int stationLogIndex)
         {
+            var row = eventLogProcessed.NewRow();
+
             row[0] = vehicleJourneyID;
             row[1] = journeyPatternID;
-            if (stopID != -1)
+            if (stopID != NO_DATA)
             {
                 row[2] = stopID; // Stop ID
             }
@@ -348,7 +480,7 @@ namespace UncertainEventStreams.Preprocessing
                 row[3] = DBNull.Value;
             }
             row[4] = eventype;
-            if (journeyIndex != -1)
+            if (journeyIndex != NO_DATA)
             {
                 row[5] = journeyIndex; // Stop ID
             }
@@ -356,7 +488,7 @@ namespace UncertainEventStreams.Preprocessing
             {
                 row[5] = DBNull.Value;
             }
-            if (stationLogIndex != -1)
+            if (stationLogIndex != NO_DATA)
             {
                 row[6] = stationLogIndex; // Stop ID
             }
@@ -366,6 +498,8 @@ namespace UncertainEventStreams.Preprocessing
             }
             eventLogProcessed.Rows.Add(row);
         }
+
+
         private string MakeJourneyListAsParameter(List<string> journeyList)
         {
             string journeyListParameter = "('";

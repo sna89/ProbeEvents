@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
+using System.Data.SqlClient;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -22,40 +24,37 @@ namespace UncertainEventStreams.Preprocessing.Tasks
 
         protected override void RunSpecific()
         {
-            //STEP 1:
-            //Get all (or relavant) journey pattern details ([Journey Pattern ID],[Stop Index],[Stop ID])
-            //ordered by [Journey Pattern ID] (ASC) from JourneyPatterns table
-            var journeyPatternsQuery = @"
-            WITH DS as
-            (
-            SELECT DISTINCT CASE WHEN LEN([Journey Pattern ID]) = 5 THEN (select CONCAT('000',[Journey Pattern ID]))
-	               WHEN LEN([Journey Pattern ID]) = 6 THEN (select CONCAT('00',[Journey Pattern ID]))
-	               WHEN LEN([Journey Pattern ID]) = 7 THEN (select CONCAT('0',[Journey Pattern ID]))
-	               ELSE [Journey Pattern ID]
-	               END AS [Journey Pattern ID]
-	               ,[Stop Index]
-                  ,[A]
-                  ,[Stop ID]
-                  ,[B]
-                  ,[C]
-                  ,[D]
-            FROM [ProbeEvents].[dbo].[JourneyPatterns]
-            )
-            SELECT DISTINCT [Journey Pattern ID],[Stop Index],[Stop ID]
-              FROM DS
-              where 1 = 1 and 
-              [Journey Pattern ID] in (select distinct top 1 [Journey Pattern ID] from [ProbeEvents].[dbo].[EventLog] order by [Journey Pattern ID])
-              order by [Journey Pattern ID],[Stop Index]
-              ";
             var helper = new StoreHelper(); 
             List<string> journeyList = new List<string>();
-            var journeyPatternsDT = helper.FillJourneyPatternsDT(journeyPatternsQuery, journeyList);
+            var journeyPatternsDT = helper.FillJourneyPatternsDT(journeyList);
             Console.WriteLine("{0} rows processed", journeyPatternsDT.Rows.Count);
-            var eventLogDT = helper.FillEventLogDT(journeyList,true);
+            var eventLogDT = helper.CreateEventLog();
+            journeyList.Clear();
+            journeyList.Add("00411001");
+            journeyList.Add("00680003");
+            journeyList.Add("00010001");
+            journeyList.Add("07471001");
+
+            foreach (var journey in journeyList)
+            {
+                helper.AddJourenyToEventLogDT(eventLogDT, journey);
+            }
+
             Console.WriteLine("{0} rows processed", eventLogDT.Rows.Count);
-            var EventLogProcessed = helper.CreateEventLogProcessedDT(journeyPatternsDT, eventLogDT);
-
-
+            var EventLogProcessedDT = helper.CreateEventLogProcessedDT();
+            foreach (var journey in journeyList)
+            {
+                helper.FillEventLogProcessedDT(journeyPatternsDT, eventLogDT, EventLogProcessedDT, journey);
+            }
+            Console.WriteLine("{0} rows processed", EventLogProcessedDT.Rows.Count);
+            var destinationTableName = "EventLogProcessed";
+            
+            using (SqlBulkCopy bulkCopy = new SqlBulkCopy(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+            {
+                bulkCopy.DestinationTableName = destinationTableName;
+                bulkCopy.BatchSize = 50;
+                bulkCopy.WriteToServer(EventLogProcessedDT);
+            }
 
 
 

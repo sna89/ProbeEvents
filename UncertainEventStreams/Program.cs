@@ -20,10 +20,6 @@ namespace UncertainEventStreams
                 preTask.Run();
 
 
-                //var FileImport = new FileImport();
-                //FileImport.Load();
-                return;
-
                 #region Run inference
 
                 var inference = new InferenceHelper();
@@ -42,6 +38,10 @@ namespace UncertainEventStreams
                 }
 
                 #endregion
+                //var FileImport = new FileImport();
+                //FileImport.Load();
+                return;
+
 
 
 

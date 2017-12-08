@@ -102,13 +102,13 @@ FROM dbo.OverlappingJourneyStops
 )A) B
 WHERE KnowledgeLevel in ('GOOD') and OverlapMeasure in('MEDIUM','LOW')";
 
-            //yield return new ComparisonInfo(new JourneyKey("046A1001", 16643), new JourneyKey("01451001", 16434), 786);
+            yield return new ComparisonInfo(new JourneyKey("00411001", 13065), new JourneyKey("00010001", 14858), 52);
 
             var journey = _helper.GetReader<ComparisonInfo>(sql,
                 r => new ComparisonInfo(new JourneyKey(GetValue<string>(r, "First Journey Pattern ID"), (int)r["First Vehicle Journey ID"]),
                      new JourneyKey(GetValue<string>(r, "Second Journey Pattern ID"), (int)r["Second Vehicle Journey ID"]), (int)r["Stop ID"]));
 
-            return journey;
+            //return journey;
         }
 
         public void WriteResult(JourneyKey firstJourney, JourneyKey secondJourney, int stopId, RunResult result)
