@@ -171,9 +171,15 @@ namespace UncertainEventStreams.Preprocessing
 
         public void AddJourenyToEventLogDT(DataTable eventLogDT, String journey)
         {
-           
-            string sqlQuery = "select * from [ProbeEvents].[dbo].[EventLog] where [Journey Pattern ID] = @journeyListID order by [Vehicle Journey ID],[Timestamp]";
+
+            #region sql
+
+            var sqlQuery = @"select * from [ProbeEvents].[dbo].[EventLog] where [Journey Pattern ID] = @journeyListID 
+            and timestamp >= '2014-09-14 10:00:00.000' and timestamp <= '2014-09-14 12:00:00.000'
+            order by [Vehicle Journey ID],[Timestamp]";
             
+                
+            #endregion
             using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
             {
                 conn.Open();
@@ -227,42 +233,54 @@ namespace UncertainEventStreams.Preprocessing
             return eventLogProcessedDT;
         }
 
-        public void FillEventLogProcessedDT(DataTable journeyPatternsDT, DataTable eventLogDT,DataTable eventLogProcessedDT, string journeyPatternID) { 
+        public void FillEventLogProcessedDT(DataTable journeyPatternsDT, DataTable eventLogDT,DataTable eventLogProcessedDT, string journeyPatternID) {
 
-            DataTable journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
-            DataTable journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
-            int eventLogCounter = 0;
-            List<int> vehicleJourneyList = new List<int>();
-
-            while(eventLogCounter < journeyPatternEventLogDT.Rows.Count)
+            
+            try
             {
-                //var journeyPatternRow = journeyPatternsDT.Rows[i];
-                //if (journeyPatternID != journeyPatternRow[0].ToString())
-                //{
-                //    journeyPatternID = journeyPatternRow[0].ToString();
-                //    journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
-                //    journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
 
-                //}
-                //int stopIndex = Convert.ToInt32(row[1]);
-                //int stopID = Convert.ToInt32(journeyPatternRow[2]);
+                DataTable journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+                DataTable journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+           
+                int eventLogCounter = 0;
+                List<int> vehicleJourneyList = new List<int>();
 
-                //Step 3 - use help table from step 3 and store only relavant date about Vehicle Journey ID. For example: 14841
-                //Meaning - This new help table will store date for specific journey. In this example (00010001,14841)
-
-                var eventLogRow = journeyPatternEventLogDT.Rows[eventLogCounter];
-                int vehicleJourneyID = Convert.ToInt32(eventLogRow[5]);
-                if (!vehicleJourneyList.Contains(vehicleJourneyID))
+                while(eventLogCounter < journeyPatternEventLogDT.Rows.Count)
                 {
-                    var journeyEventLogDT = journeyPatternEventLogDT.AsEnumerable().Where(x => x.Field<int>("Vehicle Journey ID") == vehicleJourneyID).CopyToDataTable();
-                    eventLogCounter = ProcessJourney(eventLogCounter, journeyPatternID, vehicleJourneyID, journeyPatternJourneyPatternsDT, journeyEventLogDT, eventLogProcessedDT);
-                    vehicleJourneyList.Add(vehicleJourneyID);
-                }
-                else
-                {
-                    eventLogCounter++;
-                }
+                    //var journeyPatternRow = journeyPatternsDT.Rows[i];
+                    //if (journeyPatternID != journeyPatternRow[0].ToString())
+                    //{
+                    //    journeyPatternID = journeyPatternRow[0].ToString();
+                    //    journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+                    //    journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+
+                    //}
+                    //int stopIndex = Convert.ToInt32(row[1]);
+                    //int stopID = Convert.ToInt32(journeyPatternRow[2]);
+
+                    //Step 3 - use help table from step 3 and store only relavant date about Vehicle Journey ID. For example: 14841
+                    //Meaning - This new help table will store date for specific journey. In this example (00010001,14841)
+
+                    var eventLogRow = journeyPatternEventLogDT.Rows[eventLogCounter];
+                    int vehicleJourneyID = Convert.ToInt32(eventLogRow[5]);
+                    if (!vehicleJourneyList.Contains(vehicleJourneyID))
+                    {
+                        var journeyEventLogDT = journeyPatternEventLogDT.AsEnumerable().Where(x => x.Field<int>("Vehicle Journey ID") == vehicleJourneyID).CopyToDataTable();
+                        eventLogCounter = ProcessJourney(eventLogCounter, journeyPatternID, vehicleJourneyID, journeyPatternJourneyPatternsDT, journeyEventLogDT, eventLogProcessedDT);
+                        //Console.WriteLine("Rows were processed for journey: {0}",  journeyPatternID);
+                        vehicleJourneyList.Add(vehicleJourneyID);
+                    }
+                    else
+                    {
+                        eventLogCounter++;
+                    }
                 
+                }
+            }
+            catch
+            {
+                Console.WriteLine("No rows were processed for journey: {0}", journeyPatternID);
+                return;
             }
         }
 
@@ -499,7 +517,46 @@ namespace UncertainEventStreams.Preprocessing
             eventLogProcessed.Rows.Add(row);
         }
 
+        public List<Tuple<string, int, List<int>>> GetJourneyWithStop()
+        {
+            List<Tuple<string, int, List<int>>> journeyWithStops = new List<Tuple<string, int, List<int>>>() { };
 
+            var sqlQuery = @"select DISTINCT [Journey Pattern ID],[Vehicle Journey ID],[Stop ID] from [ProbeEvents].[dbo].[EventLog]
+            order by [Journey Pattern ID],[Vehicle Journey ID]";
+
+            using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+            {
+                //Open connection
+                conn.Open();
+
+                SqlCommand cmd = new SqlCommand(sqlQuery, conn);
+                SqlDataReader reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    string journeyPatternID = reader.GetString(0);
+                    int vehicleJourneyID = reader.GetInt32(1);
+                    List<int> stopList = new List<int>() { };
+                    int stopID = reader.GetInt32(2);
+                    stopList.Add(stopID);
+
+                    while (reader.Read())
+                    {
+                        if ((journeyPatternID == reader.GetString(0)) && (vehicleJourneyID == reader.GetInt32(1)))
+                        {
+                            stopID = reader.GetInt32(2);
+                            stopList.Add(stopID);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    var tuple = new Tuple<string, int, List<int>>(journeyPatternID, vehicleJourneyID, stopList);
+                    journeyWithStops.Add(tuple);
+                }
+            }
+                    return journeyWithStops;
+        }
         private string MakeJourneyListAsParameter(List<string> journeyList)
         {
             string journeyListParameter = "('";

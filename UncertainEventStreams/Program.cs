@@ -16,8 +16,8 @@ namespace UncertainEventStreams
         {
             try
             {
-                PreprocessTask preTask = new PreprocessTask();
-                preTask.Run();
+                //PreprocessTask preTask = new PreprocessTask();
+                //preTask.Run();
 
 
                 #region Run inference

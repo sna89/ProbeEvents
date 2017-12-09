@@ -29,11 +29,11 @@ namespace UncertainEventStreams.Preprocessing.Tasks
             var journeyPatternsDT = helper.FillJourneyPatternsDT(journeyList);
             Console.WriteLine("{0} rows processed", journeyPatternsDT.Rows.Count);
             var eventLogDT = helper.CreateEventLog();
-            journeyList.Clear();
-            journeyList.Add("00411001");
-            journeyList.Add("00680003");
-            journeyList.Add("00010001");
-            journeyList.Add("07471001");
+            //journeyList.Clear();
+            //journeyList.Add("00411001");
+            //journeyList.Add("00680003");
+            //journeyList.Add("00010001");
+            //journeyList.Add("07471001");
 
             foreach (var journey in journeyList)
             {
@@ -55,7 +55,6 @@ namespace UncertainEventStreams.Preprocessing.Tasks
                 bulkCopy.BatchSize = 50;
                 bulkCopy.WriteToServer(EventLogProcessedDT);
             }
-
 
 
 
