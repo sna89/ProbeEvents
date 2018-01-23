@@ -53,6 +53,7 @@ namespace UncertainEventStreams.Inference
             var j2 = Load(secondJourney, PointEvent.PointType.B);
             var algorithm = new RelationSatisfaction();
             
+
             var res = algorithm.Run(j1.Intervals, j2.Intervals, stop, (l) => CheckOverlapPath(l, stop));
             if (res != null)
             {

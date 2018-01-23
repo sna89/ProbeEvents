@@ -29,11 +29,20 @@ namespace UncertainEventStreams.Preprocessing.Tasks
             var journeyPatternsDT = helper.FillJourneyPatternsDT(journeyList);
             Console.WriteLine("{0} rows processed", journeyPatternsDT.Rows.Count);
             var eventLogDT = helper.CreateEventLog();
+            //journeyList.Remove("00840001");
+            //journeyList.Remove("046A0001");
+            //journeyList.Remove("00841002");
+            //journeyList.Remove("046A1001");
+
             //journeyList.Clear();
+            //journeyList.Add("00010001");
+            //journeyList.Add("01221001");
+            //journeyList.Add("00010003");
+
             //journeyList.Add("00411001");
             //journeyList.Add("00680003");
-            //journeyList.Add("00010001");
             //journeyList.Add("07471001");
+
 
             foreach (var journey in journeyList)
             {

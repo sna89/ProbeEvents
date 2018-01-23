@@ -174,9 +174,14 @@ namespace UncertainEventStreams.Preprocessing
 
             #region sql
 
-            var sqlQuery = @"select * from [ProbeEvents].[dbo].[EventLog] where [Journey Pattern ID] = @journeyListID 
-            and timestamp >= '2014-09-14 10:00:00.000' and timestamp <= '2014-09-14 12:00:00.000'
-            order by [Vehicle Journey ID],[Timestamp]";
+            var sqlQuery = @"WITH DT as (
+select * from [ProbeEvents].[dbo].[EventLog] where [Journey Pattern ID] = @journeyListID
+            and timestamp >= '2014-09-14 10:00:00.000' and timestamp <= '2014-09-14 14:00:00.000'
+)
+select * from DT 
+where 1=1
+and [Vehicle Journey ID] not in (select DISTINCT [Vehicle Journey ID] from [ProbeEvents].[dbo].[EventLog]  where [timestamp] >= '2014-09-14 14:00:00.000' or  [timestamp] <= '2014-09-14 10:00:00.000' )
+order by [Vehicle Journey ID],[Timestamp]";
             
                 
             #endregion
@@ -238,8 +243,17 @@ namespace UncertainEventStreams.Preprocessing
             
             try
             {
+                DataTable journeyPatternEventLogDT;
+                try
+                {
+                    journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
+                }
+                catch
+                {
+                    Console.WriteLine("No data on Journey Pattern ID = {0}", journeyPatternID);
+                    return;
+                }
 
-                DataTable journeyPatternEventLogDT = eventLogDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
                 DataTable journeyPatternJourneyPatternsDT = journeyPatternsDT.AsEnumerable().Where(x => x.Field<string>("Journey Pattern ID") == journeyPatternID).CopyToDataTable();
            
                 int eventLogCounter = 0;
@@ -266,6 +280,11 @@ namespace UncertainEventStreams.Preprocessing
                     if (!vehicleJourneyList.Contains(vehicleJourneyID))
                     {
                         var journeyEventLogDT = journeyPatternEventLogDT.AsEnumerable().Where(x => x.Field<int>("Vehicle Journey ID") == vehicleJourneyID).CopyToDataTable();
+                        if (journeyEventLogDT.Rows.Count < journeyPatternJourneyPatternsDT.Rows.Count)
+                        {
+                            eventLogCounter += journeyEventLogDT.Rows.Count;
+                            continue;
+                        }
                         eventLogCounter = ProcessJourney(eventLogCounter, journeyPatternID, vehicleJourneyID, journeyPatternJourneyPatternsDT, journeyEventLogDT, eventLogProcessedDT);
                         //Console.WriteLine("Rows were processed for journey: {0}",  journeyPatternID);
                         vehicleJourneyList.Add(vehicleJourneyID);
@@ -277,58 +296,134 @@ namespace UncertainEventStreams.Preprocessing
                 
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                Console.WriteLine("No rows were processed for journey: {0}", journeyPatternID);
+                Console.WriteLine("No rows were processed for journey: {0},{1}", journeyPatternID,ex);
                 return;
             }
+                
+            
         }
 
         private int ProcessJourney(int eventLogCounter, string journeyPatternID,int vehicleJourneyID,DataTable journeyPatternJourneyPatternsDT, DataTable JourneyEventLogDT, DataTable eventLogProcessed)
         {
-
             DateTime unknownTimeStamp = new DateTime();
-            int journeyIndex = 0;
 
+            int journeyIndex = 0;
 
             int JourneyPatternsCounter = 0;
             int JourneyEventLogCounter = 0;
             int stationLogIndex = 0;
             int eventLogStopID;
+            int journeyPatternStopID;
             int atStop = -1;
             bool resumed = false;
             bool active = false;
             bool visited = false;
-            bool firstStation = true;
+            bool suspend = true;
+            bool isFirstStop = true;
+            DateTime eventTimestamp = new DateTime();
+            DateTime endEventTimestamp = new DateTime();
 
-            int journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter][JOURENT_PATTERN_STOP_COLUMN]);
+            int lastJourneyPatternStop = GetStop(journeyPatternJourneyPatternsDT, JOURENT_PATTERN_STOP_COLUMN,lastStop:true);
+
+            int lastEventLogStop = GetStop(JourneyEventLogDT, EVENT_LOG_STOP_COLUMN,lastStop:true);
+            int lastAtStop = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogDT.Rows.Count-1][AT_STOP_COLUMN]);
 
             List<int> visitedStops = new List<int>();
 
             while (JourneyPatternsCounter < journeyPatternJourneyPatternsDT.Rows.Count && JourneyEventLogCounter < JourneyEventLogDT.Rows.Count)
             {
                 journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter][JOURENT_PATTERN_STOP_COLUMN]);
-
                 eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][EVENT_LOG_STOP_COLUMN]);
 
                 if (!visitedStops.Contains(eventLogStopID))
                 {
-                    if (firstStation)
+                    if (isFirstStop)
                     {
-                        AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Start, stationLogIndex, journeyIndex);
-                        journeyIndex++;
-                        stationLogIndex++;
+                        #region isFirstStop
+                        DateTime startEventTimestamp = new DateTime();
+
+                        if (journeyPatternStopID != eventLogStopID)
+                        {
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, eventLogStopID, startEventTimestamp, EventType.Start, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Active, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, eventTimestamp, EventType.NotActive, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+                        }
+                        else
+                        {
+                            startEventTimestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, eventLogStopID, startEventTimestamp, EventType.Start, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
+
+                            JourneyEventLogCounter++;
+                            eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][EVENT_LOG_STOP_COLUMN]);
+
+                            while (journeyPatternStopID == eventLogStopID)
+                            {
+                                atStop = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][AT_STOP_COLUMN]);
+                                eventTimestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+                                if (atStop == 0)
+                                {
+                                    active = true;
+                                    suspend = false;
+                                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, eventTimestamp, EventType.Active, stationLogIndex, journeyIndex);
+                                    journeyIndex++;
+                                    stationLogIndex++;
+                                }
+                                else if (atStop == 1)
+                                {
+                                    if (suspend)//No active events in first station
+                                    {
+                                        AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Active, stationLogIndex, journeyIndex);
+                                        journeyIndex++;
+                                        stationLogIndex++;
+                                        AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                                        journeyIndex++;
+                                        stationLogIndex++;
+                                    }
+                                    else if (active)//switch from 0 (active) to 1 (not active) - need to add suspend event
+                                    {
+                                        AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                                        journeyIndex++;
+                                        stationLogIndex++;
+                                    }
+                                    suspend = false;
+                                    active = false;
+                                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, eventTimestamp, EventType.NotActive, stationLogIndex, journeyIndex);
+                                    journeyIndex++;
+                                    stationLogIndex++;
+                                }
+                                JourneyEventLogCounter++;
+                                eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][EVENT_LOG_STOP_COLUMN]);
+                            }
+                        }
+                        JourneyPatternsCounter++;
+                        isFirstStop = false;
+                        #endregion
                     }
-                    if (journeyPatternStopID != eventLogStopID)
+                    else if (journeyPatternStopID != eventLogStopID)
                     {
-                        
+                        #region not equal
                         if (visited)
                         {
                             if (atStop == 0)
                             {
-                                //Last event of stopID in event log was Active and Suspend event is needed to be added as well.
-
+                                //Last event of stopID in event log was Active and Suspend and NotActive eventa is needed to be added as well.
                                 AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                                journeyIndex++;
+                                stationLogIndex++;
+                                AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
                                 journeyIndex++;
                             }
                             resumed = false;
@@ -338,17 +433,7 @@ namespace UncertainEventStreams.Preprocessing
                         }
                         else
                         {
-                            if (firstStation)
-                            {
-                                firstStation = false;
-                            }
-                            else
-                            {
-                                stationLogIndex = 0;
-                            }
-                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
-                            journeyIndex++;
-                            stationLogIndex++;
+                            stationLogIndex = 0;
                             AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Resume, stationLogIndex, journeyIndex);
                             journeyIndex++;
                             stationLogIndex++;
@@ -358,6 +443,9 @@ namespace UncertainEventStreams.Preprocessing
                             AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
                             journeyIndex++;
                             stationLogIndex++;
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
+                            journeyIndex++;
+                            stationLogIndex++;
 
                             stationLogIndex = 0;
                             JourneyPatternsCounter++;
@@ -365,22 +453,14 @@ namespace UncertainEventStreams.Preprocessing
                             active = false;
                             visited = false;
                         }
+                        #endregion
                     }
                     else
                     {
+                        #region equal
                         if (!visited)
                         {
-                            if (firstStation)
-                            {
-                                firstStation = false;
-                            }
-                            else
-                            {
-                                stationLogIndex = 0;
-                            }
-                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
-                            journeyIndex++;
-                            stationLogIndex++;
+                            stationLogIndex = 0;
                             AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Resume, stationLogIndex, journeyIndex);
                             journeyIndex++;
                             stationLogIndex++;
@@ -397,6 +477,15 @@ namespace UncertainEventStreams.Preprocessing
 
                             resumed = false;
                             active = true;
+                            suspend = true;
+
+                            if (eventLogStopID == lastEventLogStop)
+                            {
+                                if (lastAtStop == atStop)
+                                {
+                                    endEventTimestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+                                }
+                            }
                         }
                         else if (atStop == 1)
                         {
@@ -404,16 +493,35 @@ namespace UncertainEventStreams.Preprocessing
                             {
                                 //If station in event log get only this value (at stop = 1) then we don't know when it was active.
                                 AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Active, stationLogIndex, journeyIndex);
+                                stationLogIndex++;
+                                journeyIndex++;
+                                suspend = true;
+                            }
 
+                            if (suspend)
+                            {
+                                AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
                                 stationLogIndex++;
                                 journeyIndex++;
                             }
+
                             DateTime timestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
 
-                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, timestamp, EventType.Suspend, stationLogIndex, journeyIndex);
+                            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, timestamp, EventType.NotActive, stationLogIndex, journeyIndex);
 
                             resumed = false;
                             active = false;
+                            suspend = false;
+
+                            //Check if last station
+                            if (eventLogStopID == lastEventLogStop)
+                            {
+                                if (lastAtStop == atStop)
+                                {
+                                    endEventTimestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+                                    break;
+                                }
+                            }
                         }
                         stationLogIndex++;
                         journeyIndex++;
@@ -424,6 +532,7 @@ namespace UncertainEventStreams.Preprocessing
                             visitedStops.Add(eventLogStopID);
                         }
                         JourneyEventLogCounter++;
+                        #endregion
                     }
                 }
                 else //!visitedStops.Contains(eventLogStopID)
@@ -434,15 +543,26 @@ namespace UncertainEventStreams.Preprocessing
 
             }//End While
 
-            atStop = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter - 1][AT_STOP_COLUMN]);
-            eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter - 1][EVENT_LOG_STOP_COLUMN]);
-            if ((JourneyEventLogCounter == JourneyEventLogDT.Rows.Count) && (atStop == 0))
+            //atStop = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter - 1][AT_STOP_COLUMN]);
+            if (JourneyEventLogCounter == JourneyEventLogDT.Rows.Count)
+            { 
+                eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter - 1][EVENT_LOG_STOP_COLUMN]);
+                endEventTimestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter-1][TIMESTAMP_COLUMN]);
+            }
+            else
+            {
+                eventLogStopID = Convert.ToInt32(JourneyEventLogDT.Rows[JourneyEventLogCounter][EVENT_LOG_STOP_COLUMN]);
+                endEventTimestamp = (DateTime)(JourneyEventLogDT.Rows[JourneyEventLogCounter][TIMESTAMP_COLUMN]);
+            }
+            //last event is active
+            if (atStop == 0)
             {
                 AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, eventLogStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
                 journeyIndex++;
                 stationLogIndex++;
+                AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, eventLogStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
             }
-            
+            //if missing stops in event log 
             while (JourneyPatternsCounter < journeyPatternJourneyPatternsDT.Rows.Count)
             {
                 //In case when there is no more station in eventlog and there is more in jp
@@ -450,9 +570,6 @@ namespace UncertainEventStreams.Preprocessing
                 {
                     stationLogIndex = 0;
                     journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter][JOURENT_PATTERN_STOP_COLUMN]);
-                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
-                    journeyIndex++;
-                    stationLogIndex++;
                     AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Resume, stationLogIndex, journeyIndex);
                     journeyIndex++;
                     stationLogIndex++;
@@ -462,18 +579,35 @@ namespace UncertainEventStreams.Preprocessing
                     AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.Suspend, stationLogIndex, journeyIndex);
                     journeyIndex++;
                     stationLogIndex++;
+                    AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.NotActive, stationLogIndex, journeyIndex);
                 }
                 visited = false;
                 JourneyPatternsCounter++;
             }
+            journeyPatternStopID = Convert.ToInt32(journeyPatternJourneyPatternsDT.Rows[JourneyPatternsCounter-1][JOURENT_PATTERN_STOP_COLUMN]);
+            
+            journeyIndex++;
+            stationLogIndex++;
+            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, endEventTimestamp, EventType.End, stationLogIndex, journeyIndex);
 
-            AddEvent(eventLogProcessed, vehicleJourneyID, journeyPatternID, journeyPatternStopID, unknownTimeStamp, EventType.End, stationLogIndex, journeyIndex);
+            eventLogCounter += JourneyEventLogDT.Rows.Count;
 
-            eventLogCounter += JourneyEventLogCounter;
             return eventLogCounter;
         }
 
-
+        private int GetStop(DataTable DT,int stopColumn,bool lastStop = true)
+        {
+            int rows = DT.Rows.Count;
+            if (lastStop)
+            {
+                return Convert.ToInt32(DT.Rows[rows - 1][stopColumn]);
+            }
+            else
+            {
+                return Convert.ToInt32(DT.Rows[0][stopColumn]);
+            }
+            
+        }
         private void AddEvent(DataTable eventLogProcessed, int vehicleJourneyID, string journeyPatternID, int stopID, DateTime timestamp,EventType eventype
             ,int journeyIndex,int stationLogIndex)
         {

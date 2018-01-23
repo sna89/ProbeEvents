@@ -131,7 +131,7 @@ namespace UncertainEventStreams.Preprocessing
                 foreach (var journeyWithStop2 in journeyWithStops)
                 {
                     var journey2 = journeyWithStop2.Item1;
-                    if (!journey1.IsEqual(journey2) && !checkedJournies.Contains(journey1))
+                    if (!journey1.IsEqual(journey2) && !checkedJournies.Contains(journey1) && !checkedJournies.Contains(journey2))
                     {
                         var stopListJourney1 = journeyWithStop1.Item2;
                         var stopListJourney2 = journeyWithStop2.Item2;
