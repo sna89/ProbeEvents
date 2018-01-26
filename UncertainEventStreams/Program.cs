@@ -16,19 +16,25 @@ namespace UncertainEventStreams
         {
             try
             {
-                new ImportTask().Run();
-                return;
+                if (false)
+                {
+                    var FileImport = new FileImport();
+                    FileImport.Load();
+                }
 
-                #region Run inference
+                PreprocessTask preTask = new PreprocessTask();
+                preTask.Run();
+
+                #region run inference
 
                 var inference = new InferenceHelper();
                 var helper = new EventLogStore();
                 var journeys = helper.JourneysToCompare();
-
                 foreach (var journey in journeys)
                 {
                     try
                     {
+
                         inference.GetOverlapProbability(journey.First, journey.Second, journey.StopId);
                     }
                     catch (Exception ex)
@@ -37,10 +43,12 @@ namespace UncertainEventStreams
                 }
 
                 #endregion
+                
+                return;
 
 
 
-                //new PreprocessTask().Run();
+
             }
             catch (Exception ex)
             {

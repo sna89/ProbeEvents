@@ -45,9 +45,9 @@ namespace UncertainEventStreams.Events.IntervalBased
             foreach (var seg in Segments)
             {
                 //4. All last point events (except last interval) are suspend events
-                if (seg != Segments.Max && seg.Events.Max.Type != EventType.Suspend)
+                if (seg != Segments.Max && seg.Events.Max.Type != EventType.NotActive && seg.Events.Max.Type != EventType.Start)
                 {
-                    Console.WriteLine("Key: {0}, Segment: {1} is not valid. last event isn't suspend event (event type: {2})",
+                    Console.WriteLine("Key: {0}, Segment: {1} is not valid. last event isn't NotActive event (event type: {2})",
                         Key, seg.IntervalIndex, seg.Events.Max.Type);
                     return false;
                 }

@@ -22,5 +22,14 @@ namespace UncertainEventStreams.Entities
         {
             return string.Format("JourneyPatternId:{0}, VehicleJourneyId: {1}", JourneyPatternId, VehicleJourneyId);
         }
+
+        public bool IsEqual(JourneyKey journey)
+        {
+            if ((JourneyPatternId == journey.JourneyPatternId) && (VehicleJourneyId == journey.VehicleJourneyId))
+            {
+                return true;
+            }
+            return false;
+        }
     }
 }

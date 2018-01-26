@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Data;
+using System.Data.SqlClient;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -83,8 +85,72 @@ namespace UncertainEventStreams.Preprocessing
 
             return journeyEvent;
         }
-
         public IEnumerable<ComparisonInfo> JourneysToCompare()
+        {
+            List<Tuple<JourneyKey, List<int>>> journeyWithStops = new List<Tuple<JourneyKey, List<int>>>() { };
+
+            var sqlQuery = @"select DISTINCT [Journey Pattern ID],[Vehicle Journey ID],[Stop ID] from [ProbeEvents].[dbo].[EventLogProcessed]
+            order by [Journey Pattern ID],[Vehicle Journey ID]";
+
+            using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+            {
+                //Open connection
+                conn.Open();
+
+                SqlCommand cmd = new SqlCommand(sqlQuery, conn);
+                SqlDataReader reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    string journeyPatternID = reader.GetString(0);
+                    int vehicleJourneyID = reader.GetInt32(1);
+                    List<int> stopList = new List<int>() { };
+                    int stopID = reader.GetInt32(2);
+                    stopList.Add(stopID);
+                    JourneyKey journey = new JourneyKey(journeyPatternID, vehicleJourneyID);
+                    while (reader.Read())
+                    {
+                        if ((journeyPatternID == reader.GetString(0)) && (vehicleJourneyID == reader.GetInt32(1)))
+                        {
+                            stopID = reader.GetInt32(2);
+                            stopList.Add(stopID);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    var tuple = new Tuple<JourneyKey, List<int>>(journey, stopList);
+                    journeyWithStops.Add(tuple);
+                }
+            }
+            var journiesToCompare = new List<ComparisonInfo>();
+            List<JourneyKey> checkedJournies = new List<JourneyKey>();
+            foreach(var journeyWithStop1 in journeyWithStops)
+            {
+                var journey1 = journeyWithStop1.Item1;
+                foreach (var journeyWithStop2 in journeyWithStops)
+                {
+                    var journey2 = journeyWithStop2.Item1;
+                    if (!journey1.IsEqual(journey2) && !checkedJournies.Contains(journey1) && !checkedJournies.Contains(journey2))
+                    {
+                        var stopListJourney1 = journeyWithStop1.Item2;
+                        var stopListJourney2 = journeyWithStop2.Item2;
+                        var mutualStopList = stopListJourney1.Intersect(stopListJourney2).ToList();
+                        foreach (var stop in mutualStopList)
+                        { 
+                            var compInfo = new ComparisonInfo(new JourneyKey(journey1.JourneyPatternId, journey1.VehicleJourneyId),
+                            new JourneyKey(journey2.JourneyPatternId, journey2.VehicleJourneyId), stop);
+                            journiesToCompare.Add(compInfo);
+                        }
+                    }
+                }
+                checkedJournies.Add(journey1);
+            }
+            return journiesToCompare;
+            //yield return new ComparisonInfo(new JourneyKey("00411001", 13065), new JourneyKey("00010001", 14858), 52);
+        }
+
+        public IEnumerable<ComparisonInfo> OLDJourneysToCompare()
         {
             var sql = "select * from dbo.OverlappingStops ";
             var sql2 = @"SELECT *
@@ -102,20 +168,20 @@ FROM dbo.OverlappingJourneyStops
 )A) B
 WHERE KnowledgeLevel in ('GOOD') and OverlapMeasure in('MEDIUM','LOW')";
 
-            //yield return new ComparisonInfo(new JourneyKey("046A1001", 16643), new JourneyKey("01451001", 16434), 786);
+            yield return new ComparisonInfo(new JourneyKey("00411001", 13065), new JourneyKey("00010001", 14858), 52);
 
             var journey = _helper.GetReader<ComparisonInfo>(sql,
                 r => new ComparisonInfo(new JourneyKey(GetValue<string>(r, "First Journey Pattern ID"), (int)r["First Vehicle Journey ID"]),
                      new JourneyKey(GetValue<string>(r, "Second Journey Pattern ID"), (int)r["Second Vehicle Journey ID"]), (int)r["Stop ID"]));
 
-            return journey;
+            //return journey;
         }
 
         public void WriteResult(JourneyKey firstJourney, JourneyKey secondJourney, int stopId, RunResult result)
         {
             var cmd = @"
 DELETE FROM ProbeEvents.dbo.JourneyOverlapResults
-WHERE[Stop ID] = @StopID AND[First Vehicle Journey ID] = @FirstVehicleJourneyID AND[First Journey Pattern ID] = @FirstJourneyPatternID AND[Second Vehicle Journey ID] = @SecondVehicleJourneyID AND[Second Journey Pattern ID] = @SecondJourneyPatternID
+WHERE [Stop ID] = @StopID AND[First Vehicle Journey ID] = @FirstVehicleJourneyID AND[First Journey Pattern ID] = @FirstJourneyPatternID AND[Second Vehicle Journey ID] = @SecondVehicleJourneyID AND[Second Journey Pattern ID] = @SecondJourneyPatternID
 
  INSERT INTO ProbeEvents.dbo.JourneyOverlapResults
 ([Stop ID], [First Vehicle Journey ID], [First Journey Pattern ID], [Second Vehicle Journey ID], [Second Journey Pattern ID], NumberOfMissingEvents, Probability, [RunTimeDuration(ms)],[Pruned]) 
