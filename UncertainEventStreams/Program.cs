@@ -16,6 +16,12 @@ namespace UncertainEventStreams
         {
             try
             {
+                if (false)
+                {
+                    var FileImport = new FileImport();
+                    FileImport.Load();
+                }
+
                 PreprocessTask preTask = new PreprocessTask();
                 preTask.Run();
 
@@ -37,14 +43,12 @@ namespace UncertainEventStreams
                 }
 
                 #endregion
-                ////var FileImport = new FileImport();
-                ////FileImport.Load();
+                
                 return;
 
 
 
 
-                //new PreprocessTask().Run();
             }
             catch (Exception ex)
             {

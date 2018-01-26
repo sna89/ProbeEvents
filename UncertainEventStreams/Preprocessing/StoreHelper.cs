@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Configuration;
+using UncertainEventStreams.Entities;
 
 namespace UncertainEventStreams.Preprocessing
 {
@@ -89,7 +90,7 @@ namespace UncertainEventStreams.Preprocessing
             }
         }
 
-        public DataTable FillJourneyPatternsDT(List<string> JourneyList)
+        public DataTable FillJourneyPatternsDT(List<string> journeyPatternList)
         {
             #region query
             //STEP 1:
@@ -139,10 +140,10 @@ namespace UncertainEventStreams.Preprocessing
                             {
                                 var row = dt.NewRow();
                                 row[0] = reader.GetString(0);
-                                if (!JourneyList.Contains(row[0]))
+                                if (!journeyPatternList.Contains(row[0]))
                                 {
                                     string Journey = row[0].ToString();
-                                    JourneyList.Add(Journey);
+                                    journeyPatternList.Add(Journey);
                                 }
                                 row[1] = reader.GetInt32(1);
                                 row[2] = reader.GetInt32(2);
@@ -169,7 +170,7 @@ namespace UncertainEventStreams.Preprocessing
             return dt;
         }
 
-        public void AddJourenyToEventLogDT(DataTable eventLogDT, String journey)
+        public void AddJourenyToEventLogDT(DataTable eventLogDT, String journeyPattern)
         {
 
             #region sql
@@ -193,7 +194,7 @@ order by [Vehicle Journey ID],[Timestamp]";
                     //string journeyListParameter = MakeJourneyListAsParameter(journeyList);
                     SqlParameter param = new SqlParameter();
                     param.ParameterName = "@journeyListID";
-                    param.Value = journey;
+                    param.Value = journeyPattern;
                     command.Parameters.Add(param);
                     SqlDataReader reader = command.ExecuteReader();
                     while (reader.Read())
@@ -651,65 +652,200 @@ order by [Vehicle Journey ID],[Timestamp]";
             eventLogProcessed.Rows.Add(row);
         }
 
-        public List<Tuple<string, int, List<int>>> GetJourneyWithStop()
+        
+
+        public void DeleteJourniesWithMissingStops(DataTable EventLogProcessedDT, List<JourneyKey> journeyList)
         {
-            List<Tuple<string, int, List<int>>> journeyWithStops = new List<Tuple<string, int, List<int>>>() { };
+            Dictionary<string,int> visitedJourneys = new Dictionary<string, int>();
+            foreach(var journey in journeyList)
+            {
+                if (!visitedJourneys.ContainsKey(journey.JourneyPatternId))
+                {
+                    string sqlQuery = @"select distinct COUNT([Stop ID])
+                                        from [dbo].[JourneyPatterns]
+                                        where [Journey Pattern ID] = @journeyPatternID";
 
-            var sqlQuery = @"select DISTINCT [Journey Pattern ID],[Vehicle Journey ID],[Stop ID] from [ProbeEvents].[dbo].[EventLog]
-            order by [Journey Pattern ID],[Vehicle Journey ID]";
+                    Dictionary<string, object> parameters = new Dictionary<string, object>();
+                    parameters.Add("@journeyPatternID", journey.JourneyPatternId.TrimStart(new Char[] { '0' }));
+                    int stopsInJP = GetNumberOfStops(sqlQuery,parameters);
+                    visitedJourneys[journey.JourneyPatternId] = stopsInJP;
+                }
+            }
+            foreach(var journeyPatternWithStops in visitedJourneys)
+            {
+                var journeyPattern = journeyPatternWithStops.Key;
+                var relevantJourneylist = journeyList.Where(item => item.JourneyPatternId == journeyPattern);
+                foreach(var journey in relevantJourneylist)
+                {
+                    int stopsInEventLogProcessed;
+                    string sqlQuery = @"select COUNT(*) from
+                            (select distinct ([Stop ID])
+                            from [ProbeEvents].[dbo].[EventLogProcessed]
+                            where 
+                            [Journey Pattern ID] =  @journeyPatternID and
+                            [Vehicle Journey ID] =  @vehiclePatternID
+                            and [Stop ID] NOT IN (select distinct [Stop ID] from [ProbeEvents].[dbo].[EventLogProcessed] where [Journey Pattern ID] =  @journeyPatternID and
+                            [Vehicle Journey ID] =  @vehiclePatternID and [timestamp] is not null)) dt";
+                    Dictionary<string, object> parameters = new Dictionary<string, object>();
+                    parameters.Add("@journeyPatternID", journey.JourneyPatternId);
+                    parameters.Add("@vehiclePatternID", journey.VehicleJourneyId);
+                    stopsInEventLogProcessed = GetNumberOfStops(sqlQuery, parameters);
+                    double percentage = (double)stopsInEventLogProcessed / visitedJourneys[journey.JourneyPatternId];
+                    if (percentage > 0.2)
+                    {
+                        string cmd = @"delete from [ProbeEvents].[dbo].[EventLogProcessed]
+                            where 
+                            [Journey Pattern ID] =  @journeyPatternID and
+                            [Vehicle Journey ID] =  @vehiclePatternID
+                            ";
+                        ExecuteNonQuery(cmd, parameters);
+                    }
 
+                }
+            }
+        }
+
+        private int GetNumberOfStops(string cmd, Dictionary<string, object> parameters)
+        {
+            int numberOfStops;
             using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
             {
-                //Open connection
                 conn.Open();
-
-                SqlCommand cmd = new SqlCommand(sqlQuery, conn);
-                SqlDataReader reader = cmd.ExecuteReader();
-                while (reader.Read())
+                using (SqlCommand command = new SqlCommand(cmd, conn))
                 {
-                    string journeyPatternID = reader.GetString(0);
-                    int vehicleJourneyID = reader.GetInt32(1);
-                    List<int> stopList = new List<int>() { };
-                    int stopID = reader.GetInt32(2);
-                    stopList.Add(stopID);
-
-                    while (reader.Read())
+                    foreach (var param in parameters)
                     {
-                        if ((journeyPatternID == reader.GetString(0)) && (vehicleJourneyID == reader.GetInt32(1)))
-                        {
-                            stopID = reader.GetInt32(2);
-                            stopList.Add(stopID);
-                        }
-                        else
-                        {
-                            break;
-                        }
+                        SqlParameter parameter = new SqlParameter();
+                        parameter.ParameterName = param.Key;
+                        parameter.Value = Convert.ToString(param.Value);
+                        command.Parameters.Add(parameter);
                     }
-                    var tuple = new Tuple<string, int, List<int>>(journeyPatternID, vehicleJourneyID, stopList);
-                    journeyWithStops.Add(tuple);
+                    SqlDataReader reader = command.ExecuteReader();
+                    reader.Read();
+                    numberOfStops = Convert.ToInt32(reader.GetValue(0));
+                    reader.Close();
                 }
             }
-                    return journeyWithStops;
+            return numberOfStops;
         }
-        private string MakeJourneyListAsParameter(List<string> journeyList)
-        {
-            string journeyListParameter = "('";
-            bool flag = true;
-            foreach (var journey in journeyList)
-            {
-                if (!flag)
-                {
-                    journeyListParameter = journeyListParameter + "', '" + journey;
-                }
-                else
-                {
-                    journeyListParameter = journeyListParameter + journey;
-                    flag = false;
-                }
-            }
-            journeyListParameter = journeyListParameter + "')";
-            return journeyListParameter;
-        }
+        //private int GetNumberOfStopsInPattern(string journeyPattern)
+        //{
+        //    int stops;
+        //    var sqlQuery = @"select distinct COUNT([Stop ID])
+        //                    from [dbo].[JourneyPatterns]
+        //                    where 
+        //                    [Journey Pattern ID] =  @journeyPatternID";
+        //    using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+        //    {
+        //        conn.Open();
+        //        using (SqlCommand command = new SqlCommand(sqlQuery, conn))
+        //        {
+        //            //string journeyListParameter = MakeJourneyListAsParameter(journeyList);
+        //            SqlParameter param = new SqlParameter();
+        //            param.ParameterName = "@journeyPatternID";
+        //            param.Value = journeyPattern;
+        //            command.Parameters.Add(param);
+        //            SqlDataReader reader = command.ExecuteReader();
+        //            reader.Read();
+        //            stops = Convert.ToInt32(reader.GetValue(0));
+        //            reader.Close();
+        //        }
+        //    }
+        //    return stops;
+        //}
+
+        //private int GetNumberOfStopsInEventLogProcessed(string journeyPattern,int vehicleJourneyID)
+        //{
+        //    int stops;
+        //    var sqlQuery = @"select distinct COUNT([Stop ID])
+        //                    from [ProbeEvents].[dbo].[EventLogProcessed]
+        //                    where 
+        //                    [Journey Pattern ID] =  @journeyPatternID and
+        //                    [Vehicle Journey ID] =  @vehiclePatternID
+        //                    and [Stop ID] NOT IN (select distinct [Stop ID] from [ProbeEvents].[dbo].[EventLogProcessed] where [timestamp] is not null)";
+        //    using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+        //    {
+        //        conn.Open();
+        //        using (SqlCommand command = new SqlCommand(sqlQuery, conn))
+        //        {
+        //            //string journeyListParameter = MakeJourneyListAsParameter(journeyList);
+        //            SqlParameter param1 = new SqlParameter();
+        //            param1.ParameterName = "@journeyPatternID";
+        //            param1.Value = journeyPattern;
+        //            command.Parameters.Add(param1);
+        //            SqlParameter param2 = new SqlParameter();
+        //            param2.ParameterName = "@vehiclePatternID";
+        //            param2.Value = vehicleJourneyID;
+        //            command.Parameters.Add(param2);
+        //            SqlDataReader reader = command.ExecuteReader();
+        //            reader.Read();
+        //            stops = Convert.ToInt32(reader.GetValue(0));
+        //            reader.Close();
+        //        }
+        //    }
+        //    return stops;
+        //}
+
+
+        //public List<Tuple<string, int, List<int>>> GetJourneyWithStop()
+        //{
+        //    List<Tuple<string, int, List<int>>> journeyWithStops = new List<Tuple<string, int, List<int>>>() { };
+
+        //    var sqlQuery = @"select DISTINCT [Journey Pattern ID],[Vehicle Journey ID],[Stop ID] from [ProbeEvents].[dbo].[EventLog]
+        //    order by [Journey Pattern ID],[Vehicle Journey ID]";
+
+        //    using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+        //    {
+        //        //Open connection
+        //        conn.Open();
+
+        //        SqlCommand cmd = new SqlCommand(sqlQuery, conn);
+        //        SqlDataReader reader = cmd.ExecuteReader();
+        //        while (reader.Read())
+        //        {
+        //            string journeyPatternID = reader.GetString(0);
+        //            int vehicleJourneyID = reader.GetInt32(1);
+        //            List<int> stopList = new List<int>() { };
+        //            int stopID = reader.GetInt32(2);
+        //            stopList.Add(stopID);
+
+        //            while (reader.Read())
+        //            {
+        //                if ((journeyPatternID == reader.GetString(0)) && (vehicleJourneyID == reader.GetInt32(1)))
+        //                {
+        //                    stopID = reader.GetInt32(2);
+        //                    stopList.Add(stopID);
+        //                }
+        //                else
+        //                {
+        //                    break;
+        //                }
+        //            }
+        //            var tuple = new Tuple<string, int, List<int>>(journeyPatternID, vehicleJourneyID, stopList);
+        //            journeyWithStops.Add(tuple);
+        //        }
+        //    }
+        //    return journeyWithStops;
+        //}
+        //private string MakeJourneyListAsParameter(List<string> journeyList)
+        //{
+        //    string journeyListParameter = "('";
+        //    bool flag = true;
+        //    foreach (var journey in journeyList)
+        //    {
+        //        if (!flag)
+        //        {
+        //            journeyListParameter = journeyListParameter + "', '" + journey;
+        //        }
+        //        else
+        //        {
+        //            journeyListParameter = journeyListParameter + journey;
+        //            flag = false;
+        //        }
+        //    }
+        //    journeyListParameter = journeyListParameter + "')";
+        //    return journeyListParameter;
+        //}
 
     }
 }

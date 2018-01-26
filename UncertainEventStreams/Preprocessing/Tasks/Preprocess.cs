@@ -5,6 +5,7 @@ using System.Data.SqlClient;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using UncertainEventStreams.Entities;
 using UncertainEventStreams.Events;
 
 namespace UncertainEventStreams.Preprocessing.Tasks
@@ -25,37 +26,29 @@ namespace UncertainEventStreams.Preprocessing.Tasks
         protected override void RunSpecific()
         {
             var helper = new StoreHelper(); 
-            List<string> journeyList = new List<string>();
-            var journeyPatternsDT = helper.FillJourneyPatternsDT(journeyList);
-            Console.WriteLine("{0} rows processed", journeyPatternsDT.Rows.Count);
+            List<string> journeyPatternList = new List<string>();
+            var journeyPatternsDT = helper.FillJourneyPatternsDT(journeyPatternList);
+            Console.WriteLine("{0} rows processed in journeyPatternsDT", journeyPatternsDT.Rows.Count);
+
             var eventLogDT = helper.CreateEventLog();
-            //journeyList.Remove("00840001");
-            //journeyList.Remove("046A0001");
-            //journeyList.Remove("00841002");
-            //journeyList.Remove("046A1001");
-
-            //journeyList.Clear();
-            //journeyList.Add("00010001");
-            //journeyList.Add("01221001");
-            //journeyList.Add("00010003");
-
-            //journeyList.Add("00411001");
-            //journeyList.Add("00680003");
-            //journeyList.Add("07471001");
-
-
-            foreach (var journey in journeyList)
+            
+            foreach (var journeyPattern in journeyPatternList)
             {
-                helper.AddJourenyToEventLogDT(eventLogDT, journey);
+                helper.AddJourenyToEventLogDT(eventLogDT, journeyPattern);
             }
+            Console.WriteLine("{0} rows processed in eventLogDT", eventLogDT.Rows.Count);
 
-            Console.WriteLine("{0} rows processed", eventLogDT.Rows.Count);
+            List<JourneyKey> journeyList = new List<JourneyKey>();
+            FillJourneyList(journeyList);
+
             var EventLogProcessedDT = helper.CreateEventLogProcessedDT();
-            foreach (var journey in journeyList)
+            foreach (var journeyPattern in journeyPatternList)
             {
-                helper.FillEventLogProcessedDT(journeyPatternsDT, eventLogDT, EventLogProcessedDT, journey);
+                helper.FillEventLogProcessedDT(journeyPatternsDT, eventLogDT, EventLogProcessedDT, journeyPattern);
             }
-            Console.WriteLine("{0} rows processed", EventLogProcessedDT.Rows.Count);
+            Console.WriteLine("{0} rows processed in EventLogProcessedDT", EventLogProcessedDT.Rows.Count);
+
+
             var destinationTableName = "EventLogProcessed";
             
             using (SqlBulkCopy bulkCopy = new SqlBulkCopy(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
@@ -65,13 +58,7 @@ namespace UncertainEventStreams.Preprocessing.Tasks
                 bulkCopy.WriteToServer(EventLogProcessedDT);
             }
 
-
-
-
-
-
-
-
+            helper.DeleteJourniesWithMissingStops(EventLogProcessedDT, journeyList);
 
             //foreach (var journey in _log.GetUniqueJourneys())
             //{
@@ -88,7 +75,31 @@ namespace UncertainEventStreams.Preprocessing.Tasks
             //}
         }
 
-        private void WriteEvents(string journeyPatternId, int vehicleJourneyId)
+
+        private void FillJourneyList(List<JourneyKey> journeyList)
+        {
+            var sqlQuery = @"select distinct [Journey Pattern ID],[Vehicle Journey ID]
+from [ProbeEvents].[dbo].[EventLog]
+order by [Journey Pattern ID],[Vehicle Journey ID]";
+
+            using (var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["LogConnection"].ConnectionString))
+            {
+                conn.Open();
+                using (SqlCommand command = new SqlCommand(sqlQuery, conn))
+                {
+                    SqlDataReader reader = command.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        var journeyPatternId = Convert.ToString(reader.GetValue(0));
+                        var vehicleJourneyId = Convert.ToInt32(reader.GetValue(1));
+                        JourneyKey journey = new JourneyKey(journeyPatternId, vehicleJourneyId);
+                        journeyList.Add(journey);
+                    }
+                }
+            }
+        }
+
+    private void WriteEvents(string journeyPatternId, int vehicleJourneyId)
         {
             #region SQL
 
